@@ -312,6 +312,67 @@
         </div>
       </div>
 
+      <!-- ── Point Prediction ────────────────────────────────── -->
+      <div id="pointPredCard" class="hidden result-section">
+        <div class="card p-5">
+          <h3 class="section-title mb-3">🎯 ポイント予測（即時計算）</h3>
+          <p class="text-xs text-gray-500 mb-4">解析済みパラメータを使い、時間 → 故障率 または 故障率 → 時間 を即座に算出します。</p>
+
+          <!-- Model selector for point predict -->
+          <div id="ppModelRow" class="flex gap-2 mb-4 flex-wrap">
+            <span class="text-xs font-semibold text-gray-600 self-center mr-1">モデル:</span>
+            <button id="ppBtnWb" onclick="ppSelectModel('weibull')"
+                    class="text-xs px-3 py-1.5 rounded-lg border border-blue-400 bg-blue-50 text-blue-700 font-semibold transition-all">
+              Weibull
+            </button>
+            <button id="ppBtnDs" onclick="ppSelectModel('ds_weibull')"
+                    class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 font-semibold transition-all hidden">
+              DS-Weibull
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <!-- t → F(t) -->
+            <div class="bg-blue-50 border border-blue-100 rounded-xl p-4">
+              <label class="block text-xs font-bold text-blue-800 mb-2">時間 t を入力 → F(t) を計算</label>
+              <div class="flex gap-2">
+                <input type="number" id="ppInputT" min="0" step="any"
+                       placeholder="時間 t"
+                       class="flex-1 border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white">
+                <button onclick="runPointPredict('t')"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition-all">
+                  計算
+                </button>
+              </div>
+              <div id="ppResultF" class="mt-3 hidden">
+                <div class="text-2xl font-bold text-blue-700" id="ppFval"></div>
+                <div class="text-xs text-gray-500 mt-1" id="ppFci"></div>
+              </div>
+            </div>
+
+            <!-- F% → t(F) -->
+            <div class="bg-green-50 border border-green-100 rounded-xl p-4">
+              <label class="block text-xs font-bold text-green-800 mb-2">累積故障率 F% を入力 → 時間 t を計算</label>
+              <div class="flex gap-2">
+                <input type="number" id="ppInputF" min="0" max="100" step="any"
+                       placeholder="F (%)"
+                       class="flex-1 border border-green-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-white">
+                <button onclick="runPointPredict('F')"
+                        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded-lg transition-all">
+                  計算
+                </button>
+              </div>
+              <div id="ppResultT" class="mt-3 hidden">
+                <div class="text-2xl font-bold text-green-700" id="ppTval"></div>
+                <div class="text-xs text-gray-500 mt-1" id="ppTci"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="ppError" class="alert-err hidden text-xs"></div>
+        </div>
+      </div>
+
     </div><!-- end results -->
   </div><!-- end grid -->
 </div><!-- end container -->
@@ -322,6 +383,8 @@
 let selectedModel = "both";
 let wbPlots = {};
 let dsPlots = {};
+let fittedParams = {};   // { weibull: {alpha,beta,cov}, ds_weibull: {alpha,beta,DS,cov} }
+let currentCL = 0.9;
 
 // ── Tab switching ─────────────────────────────────────────────
 function switchTab(tab) {
@@ -507,6 +570,9 @@ function renderResults(data) {
   if (data.ds_weibull) {
     renderDSWeibull(data.ds_weibull, data.n_failures, data.n_censored);
   }
+
+  // ── Point Prediction panel ─────────────────────────────────
+  showPointPredCard(data);
 }
 
 // ── Render Weibull ─────────────────────────────────────────────
@@ -706,6 +772,117 @@ function hideAll() {
   document.getElementById('dsResults').classList.add('hidden');
   document.getElementById('wbPredCard').classList.add('hidden');
   document.getElementById('dsPredCard').classList.add('hidden');
+  document.getElementById('pointPredCard').classList.add('hidden');
+  document.getElementById('ppResultF').classList.add('hidden');
+  document.getElementById('ppResultT').classList.add('hidden');
+  document.getElementById('ppError').classList.add('hidden');
+}
+
+// ── Point Prediction ───────────────────────────────────────────
+let ppModel = 'weibull';
+
+function ppSelectModel(model) {
+  ppModel = model;
+  const wb = document.getElementById('ppBtnWb');
+  const ds = document.getElementById('ppBtnDs');
+  if (model === 'weibull') {
+    wb.className = 'text-xs px-3 py-1.5 rounded-lg border border-blue-400 bg-blue-50 text-blue-700 font-semibold transition-all';
+    ds.className = 'text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 font-semibold transition-all ' + (ds.classList.contains('hidden') ? 'hidden' : '');
+  } else {
+    ds.className = 'text-xs px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-700 font-semibold transition-all';
+    wb.className = 'text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 font-semibold transition-all';
+  }
+  // Clear previous results
+  document.getElementById('ppResultF').classList.add('hidden');
+  document.getElementById('ppResultT').classList.add('hidden');
+  document.getElementById('ppError').classList.add('hidden');
+}
+
+function showPointPredCard(data) {
+  fittedParams = {};
+  if (data.weibull)    fittedParams.weibull    = data.weibull.params_raw;
+  if (data.ds_weibull) fittedParams.ds_weibull = data.ds_weibull.params_raw;
+  currentCL = parseFloat(document.getElementById('clSelect').value);
+
+  const card = document.getElementById('pointPredCard');
+  card.classList.remove('hidden');
+
+  // Show/hide model buttons based on available results
+  const hasWb = !!fittedParams.weibull;
+  const hasDs = !!fittedParams.ds_weibull;
+  document.getElementById('ppBtnWb').classList.toggle('hidden', !hasWb);
+  document.getElementById('ppBtnDs').classList.toggle('hidden', !hasDs);
+
+  // Set default ppModel
+  if (hasWb) ppSelectModel('weibull');
+  else if (hasDs) ppSelectModel('ds_weibull');
+}
+
+async function runPointPredict(direction) {
+  const params = fittedParams[ppModel];
+  if (!params) {
+    showPPError(`${ppModel} のパラメータが見つかりません。`); return;
+  }
+
+  const payload = { model: ppModel, params, cl: currentCL };
+
+  if (direction === 't') {
+    const val = parseFloat(document.getElementById('ppInputT').value);
+    if (isNaN(val) || val <= 0) { showPPError('有効な時間 t を入力してください（正の数）。'); return; }
+    payload.query_t = val;
+  } else {
+    const val = parseFloat(document.getElementById('ppInputF').value);
+    if (isNaN(val) || val <= 0 || val >= 100) { showPPError('F% は 0〜100 の範囲で入力してください。'); return; }
+    payload.query_F = val;
+  }
+
+  document.getElementById('ppError').classList.add('hidden');
+
+  try {
+    const res = await fetch('/point_predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const r = await res.json();
+    if (r.error) { showPPError(r.error); return; }
+
+    if (direction === 't') {
+      const Fv = r.F_at_t;
+      const box = document.getElementById('ppResultF');
+      document.getElementById('ppFval').textContent = `F(t) = ${Fv !== undefined ? Fv.toFixed(3) + ' %' : '—'}`;
+      if (r.ci_lo_F !== undefined) {
+        document.getElementById('ppFci').textContent =
+          `${Math.round(currentCL*100)}% CI: [${r.ci_lo_F.toFixed(3)} %, ${r.ci_hi_F.toFixed(3)} %]`;
+      } else {
+        document.getElementById('ppFci').textContent = '';
+      }
+      box.classList.remove('hidden');
+    } else {
+      const box = document.getElementById('ppResultT');
+      if (r.t_at_F === null || r.t_at_F === undefined) {
+        document.getElementById('ppTval').textContent = r.t_at_F_note || '到達しない';
+        document.getElementById('ppTci').textContent = '';
+      } else {
+        document.getElementById('ppTval').textContent = `t = ${Number(r.t_at_F).toFixed(4)}`;
+        if (r.ci_lo_t !== undefined) {
+          document.getElementById('ppTci').textContent =
+            `${Math.round(currentCL*100)}% CI: [${Number(r.ci_lo_t).toFixed(4)}, ${Number(r.ci_hi_t).toFixed(4)}]`;
+        } else {
+          document.getElementById('ppTci').textContent = '';
+        }
+      }
+      box.classList.remove('hidden');
+    }
+  } catch (e) {
+    showPPError('通信エラー: ' + e.message);
+  }
+}
+
+function showPPError(msg) {
+  const el = document.getElementById('ppError');
+  el.textContent = '❌ ' + msg;
+  el.classList.remove('hidden');
 }
 
 // ── Keyboard shortcut: Ctrl+Enter to run ──────────────────────

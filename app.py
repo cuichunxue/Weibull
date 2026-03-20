@@ -105,6 +105,84 @@ def analyze():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
+@app.route("/point_predict", methods=["POST"])
+def point_predict():
+    """
+    Lightweight endpoint: given already-fitted params, compute F(t) or t(F) instantly.
+    Accepts: { model, params, query_t, query_F, cl }
+    Returns: { F_at_t, ci_lo_F, ci_hi_F, t_at_F, ci_lo_t, ci_hi_t }
+    """
+    try:
+        data = request.get_json(force=True)
+        model = data.get("model", "weibull")
+        params = data.get("params", {})
+        cl = float(data.get("cl", 0.9))
+        query_t = data.get("query_t")   # float or null
+        query_F = data.get("query_F")   # float (0-100) or null
+
+        result = {}
+
+        if model == "weibull":
+            wb = WeibullAnalysis()
+            wb.alpha = float(params["alpha"])
+            wb.beta  = float(params["beta"])
+            wb.mu    = np.log(wb.alpha)
+            wb.sigma = 1.0 / wb.beta
+            cov = params.get("cov")
+            wb.cov = np.array(cov) if cov is not None else None
+
+            if query_t is not None:
+                t = float(query_t)
+                F = float(wb.cdf(t))
+                lo_arr, hi_arr = wb.cdf_ci(np.array([t]), cl)
+                result["F_at_t"] = F * 100
+                result["ci_lo_F"] = float(lo_arr[0]) * 100
+                result["ci_hi_F"] = float(hi_arr[0]) * 100
+
+            if query_F is not None:
+                p = float(query_F) / 100.0
+                if 0 < p < 1:
+                    t_p = float(wb.quantile(p))
+                    lo_t, hi_t = wb.quantile_ci(p, cl)
+                    result["t_at_F"] = t_p
+                    result["ci_lo_t"] = float(lo_t)
+                    result["ci_hi_t"] = float(hi_t)
+
+        elif model == "ds_weibull":
+            ds = DSWeibullAnalysis()
+            ds.alpha = float(params["alpha"])
+            ds.beta  = float(params["beta"])
+            ds.DS    = float(params["DS"])
+            ds.mu    = np.log(ds.alpha)
+            ds.sigma = 1.0 / ds.beta
+            cov = params.get("cov")
+            ds.cov = np.array(cov) if cov is not None else None
+
+            if query_t is not None:
+                t = float(query_t)
+                F = float(ds.cdf(t))
+                lo_arr, hi_arr = ds.cdf_ci(np.array([t]), cl)
+                result["F_at_t"] = F * 100
+                result["ci_lo_F"] = float(lo_arr[0]) * 100
+                result["ci_hi_F"] = float(hi_arr[0]) * 100
+
+            if query_F is not None:
+                p = float(query_F) / 100.0
+                if 0 < p < ds.DS:
+                    t_p = float(ds.quantile(p))
+                    lo_t, hi_t = ds.quantile_ci(p, cl)
+                    result["t_at_F"] = t_p
+                    result["ci_lo_t"] = float(lo_t)
+                    result["ci_hi_t"] = float(hi_t)
+                elif p >= ds.DS:
+                    result["t_at_F"] = None
+                    result["t_at_F_note"] = f"F% ≥ DS({ds.DS*100:.1f}%) — 到達しない"
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/upload_csv", methods=["POST"])
 def upload_csv():
     """Accept CSV file upload, return parsed data as text for the textarea."""
@@ -206,9 +284,14 @@ def _weibull_result(wb, times, censored, cl, b_list, t_pred_arr):
     # Plots
     plots = _make_weibull_plots(wb, times, censored, cl)
 
+    # Raw params for client-side point_predict
+    cov_list = wb.cov.tolist() if wb.cov is not None and not np.any(np.isnan(wb.cov)) else None
+
     return {
         "alpha": _fmt(wb.alpha),
         "beta": _fmt(wb.beta),
+        "alpha_raw": float(wb.alpha),
+        "beta_raw": float(wb.beta),
         "alpha_ci": [_fmt(alpha_ci[0]), _fmt(alpha_ci[1])],
         "beta_ci": [_fmt(beta_ci[0]), _fmt(beta_ci[1])],
         "mean": _fmt(wb.mean()),
@@ -220,6 +303,7 @@ def _weibull_result(wb, times, censored, cl, b_list, t_pred_arr):
         "pred_table": pred_table,
         "plots": plots,
         "cl_pct": int(cl * 100),
+        "params_raw": {"alpha": float(wb.alpha), "beta": float(wb.beta), "cov": cov_list},
     }
 
 
@@ -259,6 +343,8 @@ def _ds_weibull_result(ds, times, censored, cl, b_list, t_pred_arr):
 
     plots = _make_ds_plots(ds, times, censored, cl)
 
+    cov_list = ds.cov.tolist() if ds.cov is not None and not np.any(np.isnan(ds.cov)) else None
+
     return {
         "alpha": _fmt(ds.alpha),
         "beta": _fmt(ds.beta),
@@ -275,6 +361,7 @@ def _ds_weibull_result(ds, times, censored, cl, b_list, t_pred_arr):
         "pred_table": pred_table,
         "plots": plots,
         "cl_pct": int(cl * 100),
+        "params_raw": {"alpha": float(ds.alpha), "beta": float(ds.beta), "DS": float(ds.DS), "cov": cov_list},
     }
 
 
