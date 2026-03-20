@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ワイブル寿命予測アプリ</title>
+
+  <!-- Plotly -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: { DEFAULT: '#2563EB', dark: '#1e40af', light: '#dbeafe' },
+            amber:   { DEFAULT: '#D97706', dark: '#b45309' },
+            success: { DEFAULT: '#16A34A', light: '#dcfce7' },
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body { font-family: 'Inter', 'Noto Sans JP', sans-serif; background: #f8fafc; }
+    .tab-btn { transition: all .2s; }
+    .tab-btn.active { background: #2563EB; color: #fff; box-shadow: 0 2px 8px rgba(37,99,235,.3); }
+    .tab-btn:not(.active):hover { background: #dbeafe; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 6px rgba(0,0,0,.08); }
+    textarea { font-family: 'Menlo', 'Consolas', monospace; }
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .result-section { animation: fadeIn .4s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .param-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px;
+                   border-radius: 20px; font-size: .85rem; font-weight: 600; }
+    .ds-badge { background: #fef3c7; color: #92400e; }
+    table { border-collapse: collapse; width: 100%; }
+    th { background: #f1f5f9; font-weight: 600; font-size: .8rem; text-transform: uppercase;
+         letter-spacing: .04em; color: #475569; padding: 8px 12px; text-align: left; }
+    td { padding: 7px 12px; font-size: .88rem; color: #334155; border-bottom: 1px solid #f1f5f9; }
+    tr:last-child td { border-bottom: none; }
+    .plot-tabs .ptab { cursor: pointer; padding: 6px 18px; border-radius: 6px; font-size: .85rem;
+                       font-weight: 500; color: #64748b; transition: all .2s; }
+    .plot-tabs .ptab.active { background: #2563EB; color: #fff; }
+    .plot-tabs .ptab:not(.active):hover { background: #e2e8f0; }
+    .section-title { font-size: 1rem; font-weight: 700; color: #1e293b; margin-bottom: .5rem;
+                     display: flex; align-items: center; gap: 6px; }
+    .param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+    .param-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
+    .param-card .label { font-size: .75rem; color: #64748b; text-transform: uppercase;
+                         letter-spacing: .06em; margin-bottom: 2px; }
+    .param-card .value { font-size: 1.25rem; font-weight: 700; color: #1e293b; }
+    .param-card .ci { font-size: .78rem; color: #64748b; margin-top: 2px; }
+    .alert-info { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px;
+                  font-size: .85rem; color: #1d4ed8; }
+    .alert-warn { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px;
+                  font-size: .85rem; color: #92400e; }
+    .alert-err  { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px 14px;
+                  font-size: .85rem; color: #991b1b; }
+    .model-selector { display: flex; gap: 8px; flex-wrap: wrap; }
+    .model-btn { border: 2px solid #e2e8f0; border-radius: 8px; padding: 8px 18px; cursor: pointer;
+                 font-weight: 600; font-size: .85rem; color: #475569; transition: all .2s; }
+    .model-btn.active { border-color: #2563EB; background: #eff6ff; color: #2563EB; }
+    .model-btn:hover:not(.active) { border-color: #94a3b8; }
+    #compareBox { background: linear-gradient(135deg, #f0fdf4, #eff6ff); border: 1px solid #bbf7d0;
+                  border-radius: 10px; padding: 16px; }
+    .good { color: #16A34A; font-weight: 700; }
+    .bad  { color: #DC2626; }
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+  </style>
+</head>
+<body class="min-h-screen py-6 px-4">
+
+<!-- ── Header ────────────────────────────────────────────── -->
+<div class="max-w-6xl mx-auto">
+  <header class="mb-6 text-center">
+    <h1 class="text-3xl font-bold text-gray-900 mb-1">
+      📊 ワイブル寿命予測アプリ
+    </h1>
+    <p class="text-gray-500 text-sm">2パラメータ Weibull & DS-Weibull (Defective Subpopulation) 最尤推定・信頼区間・B寿命予測</p>
+  </header>
+
+  <!-- ── Main Layout ────────────────────────────────────── -->
+  <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
+
+    <!-- ── LEFT: Input Panel ─────────────────────────────── -->
+    <div class="xl:col-span-2 space-y-4">
+
+      <!-- Data Input Card -->
+      <div class="card p-5">
+        <h2 class="section-title">
+          <span class="text-blue-600">①</span> データ入力
+        </h2>
+
+        <!-- Tabs: paste / upload -->
+        <div class="flex gap-2 mb-3">
+          <button id="tabPaste" onclick="switchTab('paste')"
+                  class="tab-btn active text-sm font-medium px-4 py-2 rounded-lg">
+            📝 貼り付け
+          </button>
+          <button id="tabUpload" onclick="switchTab('upload')"
+                  class="tab-btn text-sm font-medium px-4 py-2 rounded-lg">
+            📂 CSV アップロード
+          </button>
+        </div>
+
+        <!-- Paste panel -->
+        <div id="panelPaste">
+          <div class="alert-info mb-2">
+            <strong>書式：</strong>1列 = 故障時間、2列 = 時間 スペース/タブ 打ち切りフラグ (0=故障, 1=打ち切り)
+          </div>
+          <textarea id="dataText" rows="12"
+                    class="w-full border border-gray-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y"
+                    placeholder="例（故障のみ）:
+100
+250
+400
+580
+900
+
+例（打ち切りあり）:
+100  0
+250  0
+400  1
+580  0
+900  1"></textarea>
+          <div class="flex gap-2 mt-2">
+            <button onclick="loadSample('weibull')"
+                    class="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-md text-gray-600 font-medium">
+              サンプル (Weibull)
+            </button>
+            <button onclick="loadSample('ds')"
+                    class="text-xs px-3 py-1.5 bg-amber-50 hover:bg-amber-100 rounded-md text-amber-700 font-medium">
+              サンプル (DS-Weibull)
+            </button>
+            <button onclick="clearData()"
+                    class="text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 rounded-md text-red-600 font-medium ml-auto">
+              クリア
+            </button>
+          </div>
+        </div>
+
+        <!-- Upload panel -->
+        <div id="panelUpload" class="hidden">
+          <div class="alert-info mb-3">
+            CSVファイルをアップロード。時間列・打ち切り列は自動検出します。
+          </div>
+          <div id="dropZone"
+               class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+               onclick="document.getElementById('csvFile').click()"
+               ondragover="event.preventDefault(); this.classList.add('border-blue-400','bg-blue-50')"
+               ondragleave="this.classList.remove('border-blue-400','bg-blue-50')"
+               ondrop="handleDrop(event)">
+            <div class="text-4xl mb-2">📂</div>
+            <p class="text-gray-600 font-medium">クリックまたはドラッグ＆ドロップ</p>
+            <p class="text-gray-400 text-sm mt-1">.csv ファイル</p>
+          </div>
+          <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="uploadCSV(this)">
+          <div id="csvInfo" class="mt-2 text-sm text-gray-600 hidden"></div>
+        </div>
+      </div>
+
+      <!-- Analysis Options Card -->
+      <div class="card p-5">
+        <h2 class="section-title">
+          <span class="text-blue-600">②</span> 解析設定
+        </h2>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-2">モデル選択</label>
+        <div class="model-selector mb-4">
+          <button class="model-btn active" data-model="both" onclick="selectModel(this)">
+            🔄 両方 (比較)
+          </button>
+          <button class="model-btn" data-model="weibull" onclick="selectModel(this)">
+            📈 Weibull
+          </button>
+          <button class="model-btn" data-model="ds_weibull" onclick="selectModel(this)">
+            📉 DS-Weibull
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">信頼水準</label>
+            <select id="clSelect" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+              <option value="0.90" selected>90%</option>
+              <option value="0.95">95%</option>
+              <option value="0.99">99%</option>
+              <option value="0.80">80%</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">B寿命 (%)</label>
+            <input type="text" id="bLives" value="1,5,10,50,90"
+                   class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                   placeholder="例: 1,5,10,50,90">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">
+            任意時間での故障率予測 <span class="text-gray-400">(カンマ区切り, 省略可)</span>
+          </label>
+          <input type="text" id="tPredict" placeholder="例: 500, 1000, 2000"
+                 class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+        </div>
+      </div>
+
+      <!-- Run Button -->
+      <button id="runBtn" onclick="runAnalysis()"
+              class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-xl text-base shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2">
+        <span id="runIcon">▶</span>
+        <span id="runText">解析実行</span>
+      </button>
+    </div>
+
+    <!-- ── RIGHT: Results Panel ───────────────────────────── -->
+    <div class="xl:col-span-3 space-y-5" id="resultsArea">
+
+      <!-- Placeholder -->
+      <div id="placeholder" class="card p-12 text-center text-gray-400">
+        <div class="text-5xl mb-3">📈</div>
+        <p class="font-medium text-lg">データを入力して解析実行</p>
+        <p class="text-sm mt-1">ワイブル確率プロット・CDF・PDF・B寿命などを表示</p>
+      </div>
+
+      <!-- Error box -->
+      <div id="errorBox" class="alert-err hidden"></div>
+
+      <!-- ── Model Comparison ────────────────────────────── -->
+      <div id="compareBox" class="hidden result-section">
+        <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
+          ⚖️ モデル比較 (AIC / BIC)
+        </h3>
+        <div id="compareContent"></div>
+      </div>
+
+      <!-- ── Weibull Results ─────────────────────────────── -->
+      <div id="weibullResults" class="hidden result-section space-y-4">
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="section-title mb-0">📈 2パラメータ Weibull</h3>
+            <span id="wbConverged" class="text-xs px-2 py-1 rounded-full"></span>
+          </div>
+
+          <!-- Params -->
+          <div class="param-grid mb-4" id="wbParams"></div>
+
+          <!-- Plot tabs -->
+          <div class="plot-tabs flex gap-2 mb-3">
+            <button class="ptab active" onclick="switchPlot('wb','prob',this)">確率プロット</button>
+            <button class="ptab" onclick="switchPlot('wb','cdf',this)">CDF / SF</button>
+            <button class="ptab" onclick="switchPlot('wb','pdf',this)">PDF / HF</button>
+          </div>
+          <div id="wbPlotProb" class="w-full"></div>
+          <div id="wbPlotCdf"  class="w-full hidden"></div>
+          <div id="wbPlotPdf"  class="w-full hidden"></div>
+        </div>
+
+        <!-- B-life table -->
+        <div class="card p-5">
+          <h4 class="section-title">📋 B寿命予測</h4>
+          <div class="overflow-x-auto" id="wbBTable"></div>
+        </div>
+
+        <!-- Prediction table -->
+        <div class="card p-5 hidden" id="wbPredCard">
+          <h4 class="section-title">🔮 任意時間での故障率</h4>
+          <div class="overflow-x-auto" id="wbPredTable"></div>
+        </div>
+      </div>
+
+      <!-- ── DS-Weibull Results ───────────────────────────── -->
+      <div id="dsResults" class="hidden result-section space-y-4">
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="section-title mb-0">📉 DS-Weibull</h3>
+            <span id="dsConverged" class="text-xs px-2 py-1 rounded-full"></span>
+          </div>
+
+          <!-- Params -->
+          <div class="param-grid mb-4" id="dsParams"></div>
+
+          <div class="alert-info mb-3 text-xs" id="dsNote"></div>
+
+          <!-- Plot tabs -->
+          <div class="plot-tabs flex gap-2 mb-3">
+            <button class="ptab active" onclick="switchPlot('ds','prob',this)">CDF フィット</button>
+            <button class="ptab" onclick="switchPlot('ds','cdf',this)">CDF / SF</button>
+            <button class="ptab" onclick="switchPlot('ds','pdf',this)">PDF / HF</button>
+          </div>
+          <div id="dsPlotProb" class="w-full"></div>
+          <div id="dsPlotCdf"  class="w-full hidden"></div>
+          <div id="dsPlotPdf"  class="w-full hidden"></div>
+        </div>
+
+        <!-- B-life table -->
+        <div class="card p-5">
+          <h4 class="section-title">📋 B寿命予測</h4>
+          <div class="overflow-x-auto" id="dsBTable"></div>
+        </div>
+
+        <!-- Prediction table -->
+        <div class="card p-5 hidden" id="dsPredCard">
+          <h4 class="section-title">🔮 任意時間での故障率</h4>
+          <div class="overflow-x-auto" id="dsPredTable"></div>
+        </div>
+      </div>
+
+    </div><!-- end results -->
+  </div><!-- end grid -->
+</div><!-- end container -->
+
+
+<script>
+// ── State ─────────────────────────────────────────────────────
+let selectedModel = "both";
+let wbPlots = {};
+let dsPlots = {};
+
+// ── Tab switching ─────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('panelPaste').classList.toggle('hidden', tab !== 'paste');
+  document.getElementById('panelUpload').classList.toggle('hidden', tab !== 'upload');
+  document.getElementById('tabPaste').classList.toggle('active', tab === 'paste');
+  document.getElementById('tabUpload').classList.toggle('active', tab === 'upload');
+}
+
+// ── Model selector ────────────────────────────────────────────
+function selectModel(btn) {
+  selectedModel = btn.dataset.model;
+  document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Sample data ───────────────────────────────────────────────
+function loadSample(type) {
+  const weibullSample = `100\t0
+250\t0
+400\t0
+580\t0
+750\t0
+900\t0
+1050\t1
+1200\t0
+1400\t0
+1600\t1
+1800\t0
+2100\t0
+2400\t0
+2800\t1
+3200\t0`;
+
+  const dsSample = `50\t0
+120\t0
+200\t0
+350\t0
+500\t1
+700\t1
+900\t1
+1100\t1
+1300\t1
+1500\t1
+1800\t1
+2200\t1
+2800\t1
+3500\t1
+4500\t1`;
+
+  document.getElementById('dataText').value = type === 'ds' ? dsSample : weibullSample;
+  switchTab('paste');
+}
+
+function clearData() {
+  document.getElementById('dataText').value = '';
+}
+
+// ── CSV Upload ────────────────────────────────────────────────
+async function uploadCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/upload_csv', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) {
+      showError(data.error); return;
+    }
+    document.getElementById('dataText').value = data.text;
+    const info = document.getElementById('csvInfo');
+    info.textContent = `✓ ${data.rows}行 読み込み完了 (${data.info})`;
+    info.classList.remove('hidden');
+    switchTab('paste');
+  } catch (e) {
+    showError('CSVアップロードに失敗しました: ' + e.message);
+  }
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  event.currentTarget.classList.remove('border-blue-400', 'bg-blue-50');
+  const file = event.dataTransfer.files[0];
+  if (file && file.name.endsWith('.csv')) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const input = document.getElementById('csvFile');
+    input.files = dt.files;
+    uploadCSV(input);
+  }
+}
+
+// ── Analysis ──────────────────────────────────────────────────
+async function runAnalysis() {
+  const text = document.getElementById('dataText').value.trim();
+  if (!text) {
+    showError('データを入力してください。'); return;
+  }
+
+  setLoading(true);
+  hideAll();
+
+  const payload = {
+    text,
+    model: selectedModel,
+    confidence_level: parseFloat(document.getElementById('clSelect').value),
+    b_lives: document.getElementById('bLives').value,
+    t_predict: document.getElementById('tPredict').value,
+  };
+
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      showError(data.error + (data.traceback ? '\n\n' + data.traceback : ''));
+      setLoading(false);
+      return;
+    }
+
+    renderResults(data);
+  } catch (e) {
+    showError('通信エラー: ' + e.message);
+  }
+  setLoading(false);
+}
+
+function renderResults(data) {
+  document.getElementById('placeholder').classList.add('hidden');
+
+  // ── Summary info ───────────────────────────────────────────
+  // (shown in b-table headers)
+
+  // ── Model comparison ───────────────────────────────────────
+  if (data.comparison) {
+    const c = data.comparison;
+    const wAIC = parseFloat(c.weibull_aic);
+    const dAIC = parseFloat(c.ds_weibull_aic);
+    const wBIC = parseFloat(c.weibull_bic);
+    const dBIC = parseFloat(c.ds_weibull_bic);
+
+    document.getElementById('compareContent').innerHTML = `
+      <div class="overflow-x-auto">
+        <table>
+          <thead><tr>
+            <th>指標</th>
+            <th>Weibull (2P)</th>
+            <th>DS-Weibull (3P)</th>
+            <th>推奨</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td class="font-semibold">AIC</td>
+              <td class="${wAIC <= dAIC ? 'good' : 'bad'}">${c.weibull_aic}</td>
+              <td class="${dAIC <= wAIC ? 'good' : 'bad'}">${c.ds_weibull_aic}</td>
+              <td>${c.better_aic}</td>
+            </tr>
+            <tr>
+              <td class="font-semibold">BIC</td>
+              <td class="${wBIC <= dBIC ? 'good' : 'bad'}">${c.weibull_bic}</td>
+              <td class="${dBIC <= wBIC ? 'good' : 'bad'}">${c.ds_weibull_bic}</td>
+              <td>${c.better_bic}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-500 mt-2">※ 値が小さいほど良好なフィット（AIC: 情報量規準、BIC: ベイズ情報量規準）</p>
+    `;
+    document.getElementById('compareBox').classList.remove('hidden');
+  }
+
+  // ── Weibull ────────────────────────────────────────────────
+  if (data.weibull) {
+    renderWeibull(data.weibull, data.n_failures, data.n_censored);
+  }
+
+  // ── DS-Weibull ─────────────────────────────────────────────
+  if (data.ds_weibull) {
+    renderDSWeibull(data.ds_weibull, data.n_failures, data.n_censored);
+  }
+}
+
+// ── Render Weibull ─────────────────────────────────────────────
+function renderWeibull(wb, nFail, nCens) {
+  const el = document.getElementById('weibullResults');
+  el.classList.remove('hidden');
+
+  // Converged badge
+  const badge = document.getElementById('wbConverged');
+  badge.textContent = wb.converged ? '収束 ✓' : '収束未確認';
+  badge.className = 'text-xs px-2 py-1 rounded-full ' + (wb.converged ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700');
+
+  // Data summary in params
+  document.getElementById('wbParams').innerHTML = `
+    <div class="param-card">
+      <div class="label">形状パラメータ β</div>
+      <div class="value">${wb.beta}</div>
+      <div class="ci">${wb.cl_pct}% CI: [${wb.beta_ci[0]}, ${wb.beta_ci[1]}]</div>
+    </div>
+    <div class="param-card">
+      <div class="label">尺度パラメータ α (η)</div>
+      <div class="value">${wb.alpha}</div>
+      <div class="ci">${wb.cl_pct}% CI: [${wb.alpha_ci[0]}, ${wb.alpha_ci[1]}]</div>
+    </div>
+    <div class="param-card">
+      <div class="label">平均寿命 MTTF</div>
+      <div class="value">${wb.mean}</div>
+      <div class="ci"> </div>
+    </div>
+    <div class="param-card">
+      <div class="label">サンプル数</div>
+      <div class="value">${nFail + nCens}</div>
+      <div class="ci">故障: ${nFail} / 打切り: ${nCens}</div>
+    </div>
+    <div class="param-card">
+      <div class="label">対数尤度</div>
+      <div class="value" style="font-size:.95rem">${wb.log_likelihood}</div>
+      <div class="ci">AIC: ${wb.aic} / BIC: ${wb.bic}</div>
+    </div>
+  `;
+
+  // Plots
+  wbPlots = wb.plots;
+  const cfg = { responsive: true, displayModeBar: true, scrollZoom: true };
+  Plotly.newPlot('wbPlotProb', JSON.parse(wb.plots.prob).data, JSON.parse(wb.plots.prob).layout, cfg);
+  Plotly.newPlot('wbPlotCdf',  JSON.parse(wb.plots.cdf).data,  JSON.parse(wb.plots.cdf).layout,  cfg);
+  Plotly.newPlot('wbPlotPdf',  JSON.parse(wb.plots.pdf).data,  JSON.parse(wb.plots.pdf).layout,  cfg);
+
+  // B-life table
+  document.getElementById('wbBTable').innerHTML = buildBTable(wb.b_table, wb.cl_pct);
+
+  // Prediction table
+  if (wb.pred_table && wb.pred_table.length > 0) {
+    document.getElementById('wbPredTable').innerHTML = buildPredTable(wb.pred_table, wb.cl_pct);
+    document.getElementById('wbPredCard').classList.remove('hidden');
+  }
+}
+
+// ── Render DS-Weibull ──────────────────────────────────────────
+function renderDSWeibull(ds, nFail, nCens) {
+  const el = document.getElementById('dsResults');
+  el.classList.remove('hidden');
+
+  const badge = document.getElementById('dsConverged');
+  badge.textContent = ds.converged ? '収束 ✓' : '収束未確認';
+  badge.className = 'text-xs px-2 py-1 rounded-full ' + (ds.converged ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700');
+
+  document.getElementById('dsParams').innerHTML = `
+    <div class="param-card">
+      <div class="label">形状パラメータ β</div>
+      <div class="value">${ds.beta}</div>
+      <div class="ci">${ds.cl_pct}% CI: [${ds.beta_ci[0]}, ${ds.beta_ci[1]}]</div>
+    </div>
+    <div class="param-card">
+      <div class="label">尺度パラメータ α</div>
+      <div class="value">${ds.alpha}</div>
+      <div class="ci">${ds.cl_pct}% CI: [${ds.alpha_ci[0]}, ${ds.alpha_ci[1]}]</div>
+    </div>
+    <div class="param-card" style="background:#fef3c7; border-color:#fde68a;">
+      <div class="label" style="color:#92400e;">欠陥母集団割合 DS</div>
+      <div class="value" style="color:#b45309;">${ds.DS}</div>
+      <div class="ci" style="color:#92400e;">${ds.cl_pct}% CI: [${ds.DS_ci[0]}, ${ds.DS_ci[1]}]</div>
+    </div>
+    <div class="param-card">
+      <div class="label">サンプル数</div>
+      <div class="value">${nFail + nCens}</div>
+      <div class="ci">故障: ${nFail} / 打切り: ${nCens}</div>
+    </div>
+    <div class="param-card">
+      <div class="label">対数尤度</div>
+      <div class="value" style="font-size:.95rem">${ds.log_likelihood}</div>
+      <div class="ci">AIC: ${ds.aic} / BIC: ${ds.bic}</div>
+    </div>
+  `;
+
+  // DS note
+  document.getElementById('dsNote').textContent =
+    `DS = ${ds.DS} — この割合の製品のみが最終的に故障します。DS より大きい累積故障率は理論上発生しません。`;
+
+  // Plots
+  dsPlots = ds.plots;
+  const cfg = { responsive: true, displayModeBar: true, scrollZoom: true };
+  Plotly.newPlot('dsPlotProb', JSON.parse(ds.plots.prob).data, JSON.parse(ds.plots.prob).layout, cfg);
+  Plotly.newPlot('dsPlotCdf',  JSON.parse(ds.plots.cdf).data,  JSON.parse(ds.plots.cdf).layout,  cfg);
+  Plotly.newPlot('dsPlotPdf',  JSON.parse(ds.plots.pdf).data,  JSON.parse(ds.plots.pdf).layout,  cfg);
+
+  // B-life table
+  document.getElementById('dsBTable').innerHTML = buildBTable(ds.b_table, ds.cl_pct);
+
+  // Prediction table
+  if (ds.pred_table && ds.pred_table.length > 0) {
+    document.getElementById('dsPredTable').innerHTML = buildPredTable(ds.pred_table, ds.cl_pct);
+    document.getElementById('dsPredCard').classList.remove('hidden');
+  }
+}
+
+// ── Table builders ─────────────────────────────────────────────
+function buildBTable(rows, cl) {
+  let html = `<table>
+    <thead><tr>
+      <th>B寿命</th>
+      <th>累積故障率</th>
+      <th>推定寿命</th>
+      <th>${cl}% CI 下限</th>
+      <th>${cl}% CI 上限</th>
+    </tr></thead><tbody>`;
+  for (const r of rows) {
+    html += `<tr>
+      <td class="font-semibold">${r.B}</td>
+      <td>${(r.p * 100).toFixed(1)}%</td>
+      <td class="font-bold text-blue-700">${r.time}</td>
+      <td>${r.ci_lo}</td>
+      <td>${r.ci_hi}</td>
+    </tr>`;
+  }
+  return html + '</tbody></table>';
+}
+
+function buildPredTable(rows, cl) {
+  let html = `<table>
+    <thead><tr>
+      <th>時間 t</th>
+      <th>推定故障率 F(t)</th>
+      <th>${cl}% CI 下限</th>
+      <th>${cl}% CI 上限</th>
+    </tr></thead><tbody>`;
+  for (const r of rows) {
+    html += `<tr>
+      <td class="font-semibold">${r.t}</td>
+      <td class="font-bold text-blue-700">${r.F}</td>
+      <td>${r.ci_lo}</td>
+      <td>${r.ci_hi}</td>
+    </tr>`;
+  }
+  return html + '</tbody></table>';
+}
+
+// ── Plot tab switching ─────────────────────────────────────────
+function switchPlot(model, which, btn) {
+  const prefix = model === 'wb' ? 'wb' : 'ds';
+  ['Prob','Cdf','Pdf'].forEach(p => {
+    const el = document.getElementById(`${prefix}Plot${p}`);
+    el.classList.toggle('hidden', p.toLowerCase() !== which);
+  });
+  btn.closest('.plot-tabs').querySelectorAll('.ptab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── UI helpers ─────────────────────────────────────────────────
+function setLoading(on) {
+  const btn = document.getElementById('runBtn');
+  const icon = document.getElementById('runIcon');
+  const text = document.getElementById('runText');
+  btn.disabled = on;
+  if (on) {
+    icon.innerHTML = '<svg class="spinner w-5 h-5" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" stroke-dasharray="60 20" stroke-linecap="round"></circle></svg>';
+    text.textContent = '解析中...';
+    btn.classList.add('opacity-80');
+  } else {
+    icon.textContent = '▶';
+    text.textContent = '解析実行';
+    btn.classList.remove('opacity-80');
+  }
+}
+
+function showError(msg) {
+  const box = document.getElementById('errorBox');
+  box.textContent = '❌ エラー: ' + msg;
+  box.classList.remove('hidden');
+  document.getElementById('placeholder').classList.add('hidden');
+}
+
+function hideAll() {
+  document.getElementById('errorBox').classList.add('hidden');
+  document.getElementById('compareBox').classList.add('hidden');
+  document.getElementById('weibullResults').classList.add('hidden');
+  document.getElementById('dsResults').classList.add('hidden');
+  document.getElementById('wbPredCard').classList.add('hidden');
+  document.getElementById('dsPredCard').classList.add('hidden');
+}
+
+// ── Keyboard shortcut: Ctrl+Enter to run ──────────────────────
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runAnalysis();
+});
+</script>
+</body>
+</html>
