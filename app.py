@@ -112,6 +112,15 @@ def point_predict():
     Accepts: { model, params, query_t, query_F, cl }
     Returns: { F_at_t, ci_lo_F, ci_hi_F, t_at_F, ci_lo_t, ci_hi_t }
     """
+    def _nan_to_none(v):
+        """Convert float NaN to None (→ JSON null)."""
+        if v is None:
+            return None
+        try:
+            return None if np.isnan(v) else float(v)
+        except (TypeError, ValueError):
+            return None
+
     try:
         data = request.get_json(force=True)
         model = data.get("model", "weibull")
@@ -136,8 +145,8 @@ def point_predict():
                 F = float(wb.cdf(t))
                 lo_arr, hi_arr = wb.cdf_ci(np.array([t]), cl)
                 result["F_at_t"] = F * 100
-                result["ci_lo_F"] = float(lo_arr[0]) * 100
-                result["ci_hi_F"] = float(hi_arr[0]) * 100
+                result["ci_lo_F"] = _nan_to_none(float(lo_arr[0]) * 100)
+                result["ci_hi_F"] = _nan_to_none(float(hi_arr[0]) * 100)
 
             if query_F is not None:
                 p = float(query_F) / 100.0
@@ -145,8 +154,8 @@ def point_predict():
                     t_p = float(wb.quantile(p))
                     lo_t, hi_t = wb.quantile_ci(p, cl)
                     result["t_at_F"] = t_p
-                    result["ci_lo_t"] = float(lo_t)
-                    result["ci_hi_t"] = float(hi_t)
+                    result["ci_lo_t"] = _nan_to_none(lo_t)
+                    result["ci_hi_t"] = _nan_to_none(hi_t)
 
         elif model == "ds_weibull":
             ds = DSWeibullAnalysis()
@@ -163,8 +172,8 @@ def point_predict():
                 F = float(ds.cdf(t))
                 lo_arr, hi_arr = ds.cdf_ci(np.array([t]), cl)
                 result["F_at_t"] = F * 100
-                result["ci_lo_F"] = float(lo_arr[0]) * 100
-                result["ci_hi_F"] = float(hi_arr[0]) * 100
+                result["ci_lo_F"] = _nan_to_none(float(lo_arr[0]) * 100)
+                result["ci_hi_F"] = _nan_to_none(float(hi_arr[0]) * 100)
 
             if query_F is not None:
                 p = float(query_F) / 100.0
@@ -172,8 +181,8 @@ def point_predict():
                     t_p = float(ds.quantile(p))
                     lo_t, hi_t = ds.quantile_ci(p, cl)
                     result["t_at_F"] = t_p
-                    result["ci_lo_t"] = float(lo_t)
-                    result["ci_hi_t"] = float(hi_t)
+                    result["ci_lo_t"] = _nan_to_none(lo_t)
+                    result["ci_hi_t"] = _nan_to_none(hi_t)
                 elif p >= ds.DS:
                     result["t_at_F"] = None
                     result["t_at_F_note"] = f"F% ≥ DS({ds.DS*100:.1f}%) — 到達しない"

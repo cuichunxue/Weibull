@@ -850,12 +850,12 @@ async function runPointPredict(direction) {
     if (direction === 't') {
       const Fv = r.F_at_t;
       const box = document.getElementById('ppResultF');
-      document.getElementById('ppFval').textContent = `F(t) = ${Fv !== undefined ? Fv.toFixed(3) + ' %' : '—'}`;
-      if (r.ci_lo_F !== undefined) {
+      document.getElementById('ppFval').textContent = `F(t) = ${Fv != null ? Fv.toFixed(3) + ' %' : '—'}`;
+      if (r.ci_lo_F != null && r.ci_hi_F != null) {
         document.getElementById('ppFci').textContent =
           `${Math.round(currentCL*100)}% CI: [${r.ci_lo_F.toFixed(3)} %, ${r.ci_hi_F.toFixed(3)} %]`;
       } else {
-        document.getElementById('ppFci').textContent = '';
+        document.getElementById('ppFci').textContent = '（共分散行列なし — CI 計算不可）';
       }
       box.classList.remove('hidden');
     } else {
@@ -865,11 +865,11 @@ async function runPointPredict(direction) {
         document.getElementById('ppTci').textContent = '';
       } else {
         document.getElementById('ppTval').textContent = `t = ${Number(r.t_at_F).toFixed(4)}`;
-        if (r.ci_lo_t !== undefined) {
+        if (r.ci_lo_t != null && r.ci_hi_t != null) {
           document.getElementById('ppTci').textContent =
             `${Math.round(currentCL*100)}% CI: [${Number(r.ci_lo_t).toFixed(4)}, ${Number(r.ci_hi_t).toFixed(4)}]`;
         } else {
-          document.getElementById('ppTci').textContent = '';
+          document.getElementById('ppTci').textContent = '（共分散行列なし — CI 計算不可）';
         }
       }
       box.classList.remove('hidden');
